@@ -1,0 +1,804 @@
+import java.io.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Random;
+
+/**
+ * @author Simon Riendeau
+ */
+
+class Ecology {
+
+    /**
+     * @param args the command line arguments
+     * 
+     */
+    
+    private int T; //temps total de l'ecosysteme
+    private int K; //Nb de niches
+    private int ORIGINAL_CLADE_SIZE; //Original Clade Size
+    private String ORIGINAL_TREE; //Arbre d'origine
+    private boolean hasClampedEvents; //Pour determiner si on part d'une phylogenie precise
+    private int nicheAncetre;
+    private FirstEcoEvent[] firstEE; //Début de la liste de NicheEvent
+    private FirstEcoEvent root; //L'ancetre commun
+    private LastEcoEvent[] lastEE; //Fin de la liste de NicheEvent
+    private int nbSpeciations = 0;
+    private int nbExtinctions = 0;
+    private int nbNichesActives = 0;
+    private int nbMoves = 0; //Nb de coups de boucle
+    private double lambda, mu, rho; //Taux de speciation/extinction; proba d'activer une niche
+    private Random rnd; //Pour obtenir la meme suite gaussienne
+    
+
+    public static void main(String[] args) throws IOException {
+        // TODO code application logic here
+        Ecology eco = new Ecology(args);
+        while (true) {
+            eco.playWithSpeciationEvent();
+            eco.playWithExtinctionEvent();
+            eco.playWithNiches();
+            if (eco.nbMoves>20000) {
+                eco.changeLambda();
+                eco.changeMu();
+                eco.changeRho();
+            }
+            //eco.changeRoot();
+            eco.getRealNbEvents();
+            //eco.checkSpeciations();
+            if (eco.hasClampedEvents && 
+                    !eco.printLastEcoEvents().equals(eco.ORIGINAL_TREE)) {
+                eco.printErreurs();
+                break;
+            }
+            else eco.resetIsVerified();
+            eco.nbMoves++;
+        }
+    }
+    
+    Ecology(String[] args) throws IOException {
+        hasClampedEvents = Boolean.parseBoolean(args[0]);
+        K = Integer.parseInt(args[2]);
+        nbNichesActives = K;
+        T = Integer.parseInt(args[3]);
+        lambda = Double.parseDouble(args[4]);
+        mu = Double.parseDouble(args[5]);
+        rho = Double.parseDouble(args[6]);
+        firstEE = new FirstEcoEvent[K];
+        lastEE = new LastEcoEvent[K];
+        rnd = new Random(1433);
+        for(int i=0;i<K;i++) {
+            //Tableau de FirstEcoEvent
+            NicheEvent ne = new NicheEvent(i);
+            firstEE[i] = new FirstEcoEvent(ne,T);
+            if(i>0) {
+                firstEE[i].ecoprev = firstEE[i-1];
+                firstEE[i-1].econext = firstEE[i];
+            }
+            //Tableau de LastEcoEvent
+            NicheEvent ne2 = new NicheEvent(i);
+            lastEE[i] = new LastEcoEvent(ne2,0);
+            if(i>1) {
+                lastEE[i].ecoprev = lastEE[i-1];
+                lastEE[i-1].econext = lastEE[i];
+            }
+            //Liste de NicheEvent
+            firstEE[i].nid.insert(null, lastEE[i].nid);
+            lastEE[i].nid.insert(firstEE[i].nid, null);
+        }
+        //Liste d'EcoEvent
+        firstEE[K-1].ecoInsert(firstEE[K-2], lastEE[0]);
+        lastEE[0].ecoInsert(firstEE[K-1], lastEE[1]);
+        //ordonneFichier(args[0]);
+        if (hasClampedEvents) {
+            clamping(args[1]);
+        }
+        else {
+            nicheAncetre = 0;
+            root = firstEE[nicheAncetre];
+            firstEE[nicheAncetre].isReal = true;
+        }
+    }
+    
+    public void clamping(String nomFichier) {
+        try {
+            BufferedReader buff = new BufferedReader(new FileReader(nomFichier));
+            String ligne;
+            while((ligne=buff.readLine()) != null) {
+                String[] str = ligne.split(" ");
+                //On ajoute les speciations
+                NicheEvent ne1 = new NicheEvent(Integer.parseInt(str[1]));
+                NicheEvent ne2 = new NicheEvent(Integer.parseInt(str[2]));
+                SpeciationEvent se = new SpeciationEvent(ne1, ne2, Double.parseDouble(str[0]));
+                se.isClamped = true;
+                scanNiche(ne1);
+                scanNiche(ne2);
+                setEcoList(se);
+                nbSpeciations++;
+            }
+            EcoEvent e = firstEE[0];
+            double firstTime = T;
+            while(e.econext!=lastEE[K-1] && !e.isClamped) {
+                if (e.nid.next.e.getTime() > firstTime) {
+                    firstTime = e.nid.next.e.getTime();
+                    nicheAncetre = e.nid.niche;
+                }
+                e = e.econext;
+            }
+            firstEE[nicheAncetre].isReal = true;
+            root = firstEE[nicheAncetre];
+            fullScan();
+            ORIGINAL_CLADE_SIZE = cladeSize();
+            ORIGINAL_TREE = printLastEcoEvents();
+            buff.close();
+        } catch (IOException e) {
+            System.err.println("Fichier introuvable");
+        }
+    }
+    
+    public void ordonneFichier(String nomFichier) {
+        try {
+            ArrayList<Double> time = new ArrayList<Double>();
+            int nbLignes = 0;
+            BufferedReader buff = new BufferedReader(new FileReader(nomFichier));
+            String ligne;
+            //On remplit le tableau de double
+            while((ligne=buff.readLine()) != null) {
+                String[] str = ligne.split(" ");
+                time.add(Double.parseDouble(str[0]));
+                nbLignes++;
+            }
+            buff.close();
+            Collections.sort(time); //On trie le tableau
+            //On re-ecrit ds le fichier les temps
+            FileOutputStream fos = new FileOutputStream(nomFichier);
+            fos.close();
+            PrintWriter printer = new PrintWriter(new FileWriter(nomFichier, true));
+            int niches = 0;
+            for(int i=nbLignes-1;i>=0;i--) {
+                System.out.println(i);
+                printer.println(time.toArray()[i]+" "+niches+" "+ ++niches);
+            }
+            printer.close();
+        } catch (IOException e) {
+            System.err.println(e.getMessage()+" :Nom de fichier invalide!");
+        }
+    }
+    
+    public double getRandom() {
+        return rnd.nextDouble();
+    }
+    
+    public void getRealNbEvents() {
+        int localNbSpeciations = 0;
+        int localNbExtinctions = 0;
+        int nbVraiesSpeciations = 0;
+        int nbVraiesExtinctions = 0;
+        EcoEvent tmp = firstEE[K-1];
+        while(!(tmp instanceof LastEcoEvent)) {
+            if (tmp instanceof SpeciationEvent) {
+              localNbSpeciations++;
+                if (!tmp.isClamped && tmp.isReal) {
+                    nbVraiesSpeciations++;
+                }
+            }
+            else if (tmp instanceof ExtinctionEvent) {
+            	localNbExtinctions++;
+                if (tmp.isReal) {
+                    nbVraiesExtinctions++;
+                }
+            }
+            tmp = tmp.econext;
+        }
+        if (localNbSpeciations!=nbSpeciations) {
+        	System.err.println("Nombre invalide de speciations "+localNbSpeciations+":"+nbSpeciations);
+                printErreurs();
+        	System.exit(0);
+        }
+        else if (localNbExtinctions!=nbExtinctions) {
+        	System.err.println("Nombre invalide d`extinctions "+localNbExtinctions+":"+nbExtinctions);
+                printErreurs();
+        	System.exit(0);
+        }
+        else if (nbVraiesSpeciations!=nbVraiesExtinctions) {
+                System.err.println("Nombre invalide de vraies extinctions/spéciations!");
+                printErreurs();
+        	System.exit(0);
+        }
+        if (nbMoves%1000==0) writeInfo("arbre.txt",nbVraiesSpeciations,nbVraiesExtinctions);
+    }
+    
+    public void checkSpeciations() {
+        EcoEvent tmp = firstEE[0];
+        while (!(tmp instanceof LastEcoEvent)) {
+            if (tmp instanceof SpeciationEvent && !tmp.isClamped && tmp.isReal) {
+                testSpeciation(tmp);
+            }
+            tmp = tmp.econext;
+        }
+    }
+    
+    public void testSpeciation(EcoEvent tmp) {
+        //Speciation suspecte: elle est non isClamped et reelle
+        if (!findExtinction(tmp.nid.niche) && !findExtinction(tmp.getNewSpecie().niche)) {
+            //writeInfo("arbre.txt");
+            printEcoEvent(tmp.nid.prev.e);
+            printEcoEvent(tmp.getNewSpecie().prev.e);
+            printEcoEvent(tmp);
+            printEcoEvent(tmp.nid.next.e);
+            printEcoEvent(tmp.getNewSpecie().next.e);
+            System.out.println("\n"+printExcel());
+            System.exit(0);
+        }
+    }
+    
+    boolean findExtinction(int niche) { //Pour ameliorer la vitesse du programme
+        NicheEvent ne = firstEE[niche].nid;
+        while (ne!=null) {
+            if (ne.e instanceof ExtinctionEvent) return true;
+            ne = ne.next;
+        }
+        return false;
+    }
+    
+    public void playWithSpeciationEvent() {
+        double nb = getRandom();
+        if (nbSpeciations==0 || nb >= 0.5) {
+            //Si la speciation est valide, elle sera ajoutee puis ecrite dans un fichier
+            NicheEvent ne = new NicheEvent((int)(K*getRandom()));
+            int n = (int)(K*getRandom());
+            while(n==ne.niche) n = (int)(K*getRandom());
+            NicheEvent ne1 = new NicheEvent(n);
+            SpeciationEvent se = new SpeciationEvent(ne,ne1,T*getRandom());
+            setEcoList(se);
+            scanNiche(ne);
+            scanNiche(ne1);
+            fullScan();
+            double test;
+            if (nbSpeciations==0 || nbSpeciations==1) {
+                test = lambda/2;
+            }
+            else test = lambda*T*K/(nbSpeciations+1);
+            boolean accepter = testArbre();
+            if (!accepter || getRandom() > test) {
+                System.out.println("AddSpeciation: "+accepter+" "+(getRandom()>test));
+                removeSpeciation(se);
+                fullScan();
+            }
+            else {
+                //System.out.println(getRandom() <= test);
+                nbSpeciations++;
+            }
+        }
+        else { //On enleve une speciation au hasard
+            EcoEvent se = chooseSpeciation();
+            if (!se.isClamped) {
+                removeSpeciation(se);
+                fullScan();
+                double test;
+                if (nbSpeciations==1) {
+                    test = lambda/2;
+                }
+                else test = nbSpeciations/(lambda*T*K);
+                if (!testArbre() || getRandom() > test) {
+                    boolean testArbre = testArbre();
+                    if (!testArbre || getRandom() > test) {
+                        System.out.println("AddSpeciation: "+testArbre+" "+(getRandom()>test));
+                        setEcoList(se);
+                        scanNiche(se.nid);
+                        scanNiche(se.getNewSpecie());
+                        fullScan();
+                    }
+                    else {
+                            nbSpeciations--;
+                    }
+                }
+            }
+        }
+    }
+    
+    public EcoEvent chooseSpeciation() {
+        double position = getRandom()*(nbSpeciations);
+        double i = 0;
+        EcoEvent se = firstEE[K-1];
+        while (!(se instanceof SpeciationEvent)) {
+            se = se.econext;
+        }
+        while(i<position) {
+            se=se.econext;
+            if(se instanceof SpeciationEvent) i++;
+        }
+        return se;
+    }
+
+    public void removeSpeciation(EcoEvent se) {
+        se.removeEcoRefs();
+        se.nid.removeNicheRefs();
+        se.getNewSpecie().removeNicheRefs(); //SpeciationEvent: 2 NicheEvent
+    }
+    
+    public void playWithExtinctionEvent() {
+        if (nbExtinctions==0 || getRandom() >= 0.5) {
+            NicheEvent ne = new NicheEvent((int)(K*getRandom()));
+            ExtinctionEvent ee = new ExtinctionEvent(ne,T*getRandom());
+            setEcoList(ee);
+            scanNiche(ne);
+            fullScan();
+            double test;
+            if (nbExtinctions==0 || nbExtinctions==1) {
+                test = mu/2;
+            }
+            else test = mu*T*K/(nbExtinctions+1);
+            if(!testArbre() || getRandom() > test) {
+                //System.out.println(getRandom()+" "+test);
+                removeExtinction(ee);
+                fullScan();
+            }
+            else {
+            	nbExtinctions++;
+            }
+        }
+        else { //On enleve un extinction au hasard
+            EcoEvent ee = chooseExtinction();
+            removeExtinction(ee);
+            fullScan();
+            double test;
+            if (nbExtinctions==0 || nbExtinctions==1) {
+                test = mu/2;
+            }
+            else test = (nbExtinctions+1)/(mu*T*K);
+            //System.out.println("d "+(nbExtinctions+1)/(mu*T*K);
+            if(!testArbre() || getRandom() > test) {
+                //System.out.println(getRandom()+" "+test);
+                setEcoList(ee);
+                scanNiche(ee.nid);
+                fullScan();
+            }
+            else {
+            	nbExtinctions--;
+            }
+        }
+    }
+    
+    public EcoEvent chooseExtinction() { //Choisit une extinction au hasard
+        //Random rd = new Random(T);
+        double position = getRandom()*nbExtinctions;
+        int i=0;
+        EcoEvent ee = firstEE[K-1];
+        while (ee!=null && (ee instanceof ExtinctionEvent)) {
+            ee = ee.econext;
+        }
+        while(i<position) {
+            ee = ee.econext;
+            if (ee instanceof ExtinctionEvent) i++;
+        }
+        return ee;
+    }
+    
+    public void removeExtinction(EcoEvent ee) {
+        ee.removeEcoRefs();
+        ee.nid.removeNicheRefs();
+    }
+       
+    public void playWithNiches() {
+        int nicheCiblee = (int)(getRandom()*K); //Niche choisie au hasard
+        if (firstEE[nicheCiblee].nid.nicheActive) { //La niche est active
+            changeNicheStatus(nicheCiblee,false); //On la desactive, puis on test
+            if (!testArbre() || getRandom() > (1-rho)/rho) {
+                changeNicheStatus(nicheCiblee,true);
+            }
+            else {
+                nbNichesActives--;
+            }
+        }
+        else { //La niche est inactive
+            changeNicheStatus(nicheCiblee,true); //On l'active, puis on test
+            if (!testArbre() || getRandom() > rho/(1-rho)) {
+                changeNicheStatus(nicheCiblee,false);
+            }
+            else {
+                nbNichesActives++;
+            }
+        }
+    }
+    
+    public void changeNicheStatus(int niche, boolean status) {
+        NicheEvent ne = firstEE[niche].nid;
+        while(ne!=null) {
+        	ne.nicheActive = status;
+        	ne = ne.next;
+        }
+        fullScan();
+    }
+    
+    double changeParam(double param, int nbEvenements) {
+        double m = setDelta();
+        double newParam = Math.exp(m)*param;
+        //Random rd = new Random(T);
+        double u = Math.log(getRandom());
+        double test = (param-newParam)*T*K+nbEvenements*m;
+        if (u < test) {
+            param = newParam;
+        }
+        //System.out.println();
+        return param;
+    }
+    
+    public void changeLambda() {
+        lambda = changeParam(lambda,nbSpeciations);
+    }
+    
+    public void changeMu() {
+        mu = changeParam(mu,nbExtinctions);
+    }
+    
+    public void changeRho() {
+        double newRho = rho + setDelta();
+        //Random rd = new Random(T);
+        if (Math.log(getRandom()) < nbNichesActives*Math.log(newRho/rho) 
+                + (K-nbNichesActives)*Math.log((1-newRho)/(1-rho))) {
+            rho = newRho;
+        }
+    }
+    
+    double setDelta() {
+        double sigma = 0.1;
+        //Random rd = new Random(T);
+        double m = sigma*(getRandom()-0.5);
+        return m;
+    }
+    
+    public void changeRoot() {
+        FirstEcoEvent formerRoot = root;
+        formerRoot.isReal = false;
+        removeRoot(formerRoot);
+        //On place le nouvel ancetre
+        if (getRandom() < 0.5) nicheAncetre = (int)(getRandom()*K);
+        NicheEvent ne = new NicheEvent(nicheAncetre);
+        int sigma = 10;
+        double timeDifference = sigma*(getRandom()-0.5);
+        double newTime = formerRoot.getTime()+timeDifference;
+        if (newTime > 300 || newTime < 0) {
+            timeDifference = -timeDifference;
+        }
+        root = new FirstEcoEvent(ne, formerRoot.getTime()+timeDifference);
+        scanNiche(ne);
+        setEcoList(root);
+        root.isReal = true;
+        fullScan();
+        //On test la validite de l'arbre
+        if (!testArbre()) {
+            nicheAncetre = formerRoot.nid.niche;
+            removeRoot(root);
+            root = formerRoot;
+            /*Si formerRoot est dans le tableau de FirstEcoEvent, pas besoin de
+              le re-inserer dans la ecolist et dans une niche */
+            boolean formerRootIsFirstEE = false;
+            EcoEvent e = firstEE[0];
+            while(e instanceof FirstEcoEvent && !formerRootIsFirstEE) {
+                if (e.equals(root)) formerRootIsFirstEE = true;
+                e = e.econext;
+            }
+            if (!formerRootIsFirstEE) {
+                scanNiche(root.nid);
+                setEcoList(root);
+            }
+            root.isReal = true;
+            fullScan();
+        }
+    }
+    
+    public void removeRoot(EcoEvent fee) {
+        fee.removeEcoRefs();
+        fee.nid.removeNicheRefs();
+    }
+    
+    public void setEcoList(EcoEvent ecoEv) {
+        if(firstEE[K-1].econext==lastEE[0]) { //Aucune speciation/extinction ajoutee
+            ecoEv.ecoInsert(firstEE[K-1], lastEE[0]);
+        }
+        else { //Classer en odre chonologique
+            EcoEvent e2 = firstEE[K-1];
+            while(e2.econext!=lastEE[K-1] && e2.econext.getTime() > ecoEv.getTime()) {
+                e2=e2.econext;
+            }
+            ecoEv.ecoInsert(e2,e2.econext);
+        }
+    }
+    
+    public void scanNiche(NicheEvent ne) {
+        /* Parcourir la niche de next en next du 1er NicheEvent jusqu'au
+         * NicheEvent dont e.getTime() est immediatement apres ne.e.getTime()
+         * ou jusqu'a null
+         */
+        NicheEvent ne2 = firstEE[ne.niche].nid;
+        while(ne2.next!=lastEE[ne.niche].nid && ne2.next.e.getTime() > ne.e.getTime()) {
+            ne2 = ne2.next;
+        }
+        ne.insert(ne2,ne2.next);
+    }
+
+    public boolean testArbre() {
+        if (!hasClampedEvents) return true;
+        if (!printLastEcoEvents().equals(ORIGINAL_TREE) || 
+            cladeSize()!=ORIGINAL_CLADE_SIZE ||
+            nbNichesActives<ORIGINAL_CLADE_SIZE) {
+            return false;
+        }
+        EcoEvent e1 = firstEE[K-1].econext;
+        while (!(e1 instanceof LastEcoEvent)) {
+            if (!e1.localTest()) {
+                resetIsVerified();
+                return false;
+            }
+            else resetIsVerified();
+            e1 = e1.econext;
+        }
+        return true;
+    }
+    
+    public void fullScan() {
+        //On doit pouvoir modifier les event eux-memes
+        EcoEvent tmp = firstEE[0];
+        tmp.decideIfReal();
+        resetIsVerified();
+    }
+    
+    public void scanFrom(EcoEvent e) {
+        EcoEvent tmp;
+        if (e.getNewSpecie()!=null && 
+                e.getNewSpecie().prev.e.getTime() > e.nid.prev.e.getTime()) {
+            //Le prev du newSpecie est plus vieux que le prev du nid
+            tmp = e.getNewSpecie().prev.e;
+        }
+        else {
+            tmp = e.nid.prev.e;
+        }
+        while(tmp!=null) {
+            tmp.decideIfReal();
+            tmp = tmp.econext;
+        }
+        resetIsVerified();
+    }
+    
+    public void resetIsVerified() {
+        //Remet le isVerified des LastEcoEvent a false
+        for(int i=0;i<K;i++) {
+            lastEE[i].reset();
+        }
+    }
+    
+    int cladeSize() {
+        int j=0;
+        for(int i=0;i<K;i++) {
+            if(lastEE[i].isReal) j++;
+        }
+        return j;
+    }
+    
+    public void printErreurs() {
+        System.err.print(printLastEcoEvents());
+        System.err.println("\nNbMoves:"+nbMoves+" Clade Size:"+cladeSize());
+        //System.out.println(printExcel());
+        System.out.println(cladeSize()+" "+ORIGINAL_CLADE_SIZE);
+    }
+    
+    String printLastEcoEvents() {
+        String texte = "";
+        for (int i=0;i<K;i++) {
+            texte += lastEE[i].getCladeSize()+" ";
+        }
+        resetIsVerified();
+        return texte;
+    }
+    
+    public void writeInfo(String nomFichier, int nbVraiesSpeciations, int nbVraiesExtinctions) {
+        try {
+            PrintWriter printer = new PrintWriter(new FileWriter("stats1.txt", true));
+            printer.println();
+            if(nbMoves==0) {
+                printer.println();
+                printer.println(nomFichier);
+                printer.println("Moves:   Spéciations:   Nb attendu de spéciations:"
+                        +"   VraiesSpéciations:   Extinctions:   Nb attendu d'extinctions:"
+                        +"   VraiesExtinctions:   NbNichesActives:   K:    T:    Root niche:   Root time:"
+                        +"              Lambda:                 Mu:                     Rho:");
+                printer.println();
+            }
+            printer.print(nbMoves+calculEspace("Moves",nbMoves)
+                    +nbSpeciations+calculEspace("Speciations",nbSpeciations)
+                    +lambda*T*K+calculEspace("nb attendu de spéciations:   ",(lambda*T*K))
+                    +nbVraiesSpeciations+calculEspace("VraiesSpeciations",nbVraiesSpeciations)
+                    +nbExtinctions+calculEspace("Extinctions",nbExtinctions)
+                    +mu*T*K
+                    +calculEspace("nb attendu d'extinctions:   ",(mu*T*K))
+                    +nbVraiesExtinctions+calculEspace("VraiesExtinctions",nbVraiesExtinctions)
+                    +nbNichesActives+calculEspace("nbNichesActives", nbNichesActives)
+                    +K+calculEspace("K",K)+T+calculEspace("T",T)
+                    +root.nid.niche+calculEspace("root niche", root.nid.niche)
+                    +root.getTime()+calculEspace("root time", root.getTime())
+                    +lambda+calculEspace("lambda", lambda)+mu+calculEspace("mu",mu)+rho);
+            printer.close();
+        } catch(IOException e) {
+            System.err.println("Nom de fichier invalide!");
+        }
+    }
+    
+    String calculEspace(String mot, double precedent) {
+        String espaces = "";
+        int espaceSouhaite = 24-String.valueOf(precedent).length();
+        if (mot.length() >= 24) 
+            espaceSouhaite = String.valueOf(mot).length()-String.valueOf(precedent).length();
+        for (int i=0;i<espaceSouhaite;i++) { //+4 pour les 3 espaces entre chaque mots + ":"
+            espaces+=" ";
+        }
+        return espaces;
+    }
+    String calculEspace(String mot, int precedent) {
+        String espaces = "";
+        if (mot.equals("K") || mot.equals("T")) espaces = " ";
+        int espaceSouhaite = mot.length() - String.valueOf(precedent).length();
+        for (int i=0;i<espaceSouhaite+4;i++) { //+4 pour les 3 espaces entre chaque mots + ":"
+            espaces+=" ";
+        }
+        return espaces;
+    }
+    
+    public void writeTree() {
+        try {
+            PrintWriter printer = new PrintWriter(new FileWriter("arbres.txt", true));
+            printer.write(printExcel());
+        } catch(IOException e) {
+            System.err.println("Nom de fichier invalide!");
+        }
+    }
+
+    String printExcel() {
+        return printEcoEventsInfos(FirstEcoEvent.class,true)
+               +printEcoEventsInfos(FirstEcoEvent.class,false)
+               +printEcoEventsInfos(SpeciationEvent.class,true)
+               +printEcoEventsInfos(SpeciationEvent.class,false)
+               +printEcoEventsInfos(ExtinctionEvent.class,true)
+               +printEcoEventsInfos(ExtinctionEvent.class,false)
+               +printEcoEventsInfos(LastEcoEvent.class,true)
+               +printEcoEventsInfos(LastEcoEvent.class,false);
+    }
+    
+    String printEcoEventsInfos(Class classe, boolean isReal) {
+        String texte = "";
+        //Class + isReal
+        EcoEvent tmp = firstEE[0];
+        while (tmp!=null) {
+            if (tmp.getClass().equals(classe) && tmp.isReal==isReal) {
+                texte += tmp.getClass()+" "+tmp.isReal+"\n";
+                if (classe.getName().equals("SpeciationEvent")) {
+                    texte += tmp.getClass()+" "+tmp.isReal+"\n";
+                }
+            }
+            tmp = tmp.econext;
+        }
+        texte += "\n";
+        //Time
+        tmp = firstEE[0];
+        while (tmp!=null) {
+            if (tmp.getClass().equals(classe) && tmp.isReal==isReal) {
+                texte += tmp.getTime()+"\n";
+                if (classe.getName().equals("SpeciationEvent")) {
+                    texte += tmp.getTime()+"\n";
+                }
+            }
+            tmp = tmp.econext;
+        }
+        texte += "\n";
+        //Niche
+        tmp = firstEE[0];
+        while (tmp!=null) {
+            if (tmp.getClass().equals(classe) && tmp.isReal==isReal) {
+                texte += tmp.nid.niche+"\n";
+                if (classe.getName().equals("SpeciationEvent")) {
+                    texte += tmp.getNewSpecie().niche+"\n";
+                }
+            }
+            tmp = tmp.econext;
+        }
+        texte += "\n";
+        //isOccupied
+        tmp = firstEE[0];
+        while (tmp!=null) {
+            if (tmp.getClass().equals(classe) && tmp.isReal==isReal) {
+                texte += tmp.nid.isOccupied+"\n";
+                if (classe.getName().equals("SpeciationEvent")) {
+                    texte += tmp.getNewSpecie().isOccupied+"\n";
+                }
+            }
+            tmp = tmp.econext;
+        }
+        texte += "\n\n";
+        return texte;
+    }
+    
+    public void printNicheEvent(NicheEvent tmp) {
+        System.out.print(tmp.prev+" "+tmp+" "+tmp.next+"   "+tmp.e+" "+tmp.e.getTime()+
+                " niche: "+tmp.niche+" isOccupied:"+tmp.isOccupied+" isReal:"+tmp.e.isReal+
+                " isClamped:"+tmp.e.isClamped+" cladeSize:"+tmp.e.getCladeSize());
+        resetIsVerified();
+        System.out.println(" isCladogenetic:"+tmp.e.isCladogenetic());
+        resetIsVerified();
+    }
+    
+    public void printNiche(int niche) {
+        NicheEvent ne = firstEE[niche].nid;
+        while(ne!=null) {
+            printNicheEvent(ne);
+            ne = ne.next;
+        }
+        System.out.println();
+    }
+    
+    public void printNicheEvents() {
+        NicheEvent ne = firstEE[0].nid;
+        EcoEvent ee = firstEE[0];
+        System.out.println("Version EcoEvent:");
+        while(ee!=null) {
+            printNicheEvent(ee.nid);
+            if (ee.getNewSpecie()!=null) printNicheEvent(ee.getNewSpecie());
+            ee = ee.econext;
+        }
+        System.out.println("\nVersion NicheEvent:");
+        while(ne.e.econext!=null) {
+            printNicheEvent(ne);
+            if (ne.e.getNewSpecie()!=null) printNicheEvent(ne.e.getNewSpecie());
+            ne = ne.e.econext.nid;
+        }
+        System.out.println("\n");
+    }
+    
+    public void printNiches() {
+        System.out.println("Listes de NicheEvent:");
+        for(int i=0;i<K;i++) {
+            NicheEvent tmp = firstEE[i].nid;
+            System.out.println("Niche "+i);
+            while(tmp!=null) {
+                printNicheEvent(tmp);
+                tmp = tmp.next;
+            }
+            System.out.println();
+        }
+        System.out.println();
+    }
+    
+    public void printClampedEvents() {
+        EcoEvent tmp = firstEE[K-1].econext;
+        while(tmp!=null) {
+            if (tmp.isClamped) printEcoEvent(tmp);
+            tmp = tmp.econext;
+        }
+    }
+    
+    public void printEcoEvent(EcoEvent e) {
+        System.out.print(e.ecoprev+" "+e+" "+e.econext+" "+e.getTime()
+                +"   Nid:"+e.nid.niche+" "+e.nid.isOccupied);
+        if (e.getNewSpecie()!=null)
+            System.out.print(" NewSpecie:"+e.getNewSpecie().niche+" "+e.getNewSpecie().isOccupied);
+        System.out.print(" isClamped:"+e.isClamped+" isReal:"+e.isReal+
+                " Clade size:"+e.getCladeSize()+";"+cladeSize());
+        resetIsVerified();
+        System.out.println(" isCladogenetic:"+e.isCladogenetic());
+        resetIsVerified();
+    }
+    
+    public void printEcoEvents() { //Tous les EcoEvent
+        EcoEvent tmp = firstEE[0];
+        System.out.println("Liste d'EcoEvent:");
+        while(tmp!=null) {
+            printEcoEvent(tmp);
+            tmp = tmp.econext;
+        }
+        System.out.println();
+    }
+    
+    int getT() {return T;}
+    int getK() {return K;}
+    int getN() {return nicheAncetre;}
+    FirstEcoEvent getRoot() {return root;}
+}
