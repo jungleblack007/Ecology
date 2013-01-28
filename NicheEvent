@@ -1,0 +1,29 @@
+/**
+ * @author Simon Riendeau
+ */
+
+class NicheEvent {
+    int niche;
+    boolean isOccupied = false; // => ecq il y a deja une espece sur la niche?
+    boolean nicheActive = true;
+    EcoEvent e;
+    NicheEvent prev,next;
+    
+    NicheEvent(int n) {niche = n;}
+    
+    void setEcoEvent(EcoEvent e1) {e = e1;}
+    
+    void insert(NicheEvent ne1, NicheEvent ne2) {
+        prev = ne1;
+        next = ne2;
+        if (ne1!=null) ne1.next = this;
+        if (ne2!=null) ne2.prev = this;
+    }
+    
+    void removeNicheRefs() {
+        NicheEvent prev = this.prev;
+        NicheEvent next = this.next;
+        if(prev!=null) prev.next = next;
+        if(next!=null) next.prev = prev;
+    }
+}
