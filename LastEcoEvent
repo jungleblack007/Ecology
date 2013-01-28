@@ -1,0 +1,32 @@
+/**
+ * 
+ * @author Simon Riendeau
+ */
+
+class LastEcoEvent extends EcoEvent {
+    private boolean isVerified = false; //V:getCladeSize verifie. F:Pas encore verifie.
+    LastEcoEvent(NicheEvent ne, double t) {
+        super(ne,t);
+    }
+    
+    void reset() {
+        isVerified = false;
+    }
+    
+    @Override
+    void decideIfReal() {
+        isReal = nid.isOccupied && nid.nicheActive;
+        if (econext!=null) econext.decideIfReal();
+    }
+    
+    @Override
+    int getCladeSize() {
+        if (isReal && !isVerified) {
+            isVerified = true; //Evite de ré-incrémenter la taille du clade
+            return 1;
+        }
+        else {
+            return 0;
+        }
+    }
+}
