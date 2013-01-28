@@ -1,0 +1,64 @@
+/**
+ * 
+ * @author Simon Riendeau
+ */
+
+class SpeciationEvent extends EcoEvent {
+    private NicheEvent newSpecie;
+    SpeciationEvent(NicheEvent ne1, NicheEvent ne2, double t) {
+        super(ne1,t);
+        newSpecie = ne2;
+        newSpecie.setEcoEvent(this);
+    }
+    
+    @Override
+    void decideIfReal() {
+        isReal = (nid.isOccupied ^ newSpecie.isOccupied) &&
+                nid.nicheActive && newSpecie.nicheActive;
+        if (isReal) {
+            nid.next.isOccupied = true;
+            newSpecie.next.isOccupied = true;
+        }
+        else {
+            nid.next.isOccupied = nid.isOccupied;
+            newSpecie.next.isOccupied = newSpecie.isOccupied;
+        }
+        nid.next.nicheActive = nid.nicheActive;
+        newSpecie.next.nicheActive = newSpecie.nicheActive;
+        econext.decideIfReal();
+    }
+    
+    @Override
+    boolean localTest() {
+        if (isClamped && (!nid.nicheActive || !newSpecie.nicheActive)) {
+            return false;
+        }
+        else if (isClamped && !isReal) {
+            return false;
+        }
+        else {
+            boolean clado = isCladogenetic();
+            if ((isClamped && clado) || (!isClamped && !clado)) {
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+    }
+    
+    @Override
+    NicheEvent getNewSpecie() {
+        return newSpecie;
+    }
+    
+    @Override
+    int getCladeSize() {
+        return nid.next.e.getCladeSize()+newSpecie.next.e.getCladeSize();
+    }
+    
+    @Override
+    boolean isCladogenetic() {
+        return (isReal && nid.next.e.getCladeSize()>=1 && newSpecie.next.e.getCladeSize()>=1);
+    }
+}
