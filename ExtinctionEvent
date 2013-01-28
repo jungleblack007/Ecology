@@ -1,0 +1,23 @@
+/**
+ * 
+ * @author Simon Riendeau
+ */
+
+class ExtinctionEvent extends EcoEvent {
+    ExtinctionEvent(NicheEvent ne, double t){
+        super(ne,t);
+    }
+    
+    @Override
+    void decideIfReal() {
+        isReal = nid.isOccupied && nid.nicheActive;
+        nid.next.isOccupied = false;
+        nid.next.nicheActive = nid.nicheActive;
+        econext.decideIfReal();
+    }
+    
+    @Override
+    int getCladeSize() {
+        return 0;
+    }
+}
