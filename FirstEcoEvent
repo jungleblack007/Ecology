@@ -1,0 +1,29 @@
+/**
+ *
+ * @author Simon Riendeau
+ */
+
+public class FirstEcoEvent extends EcoEvent {
+    FirstEcoEvent(NicheEvent ne, double t) {
+        super(ne,t);
+    }
+    
+    @Override
+    void decideIfReal(){
+        //FirstEcoEvent: isReal dans Ecology (clamping)
+        nid.isOccupied = isReal && nid.nicheActive;
+        nid.next.isOccupied = nid.isOccupied;
+        nid.next.nicheActive = nid.nicheActive;
+        econext.decideIfReal();
+    }
+    
+    @Override
+    int getCladeSize() {
+        if (isReal) {
+            return nid.next.e.getCladeSize();
+        }
+        else {
+            return 0;
+        }
+    }
+}
