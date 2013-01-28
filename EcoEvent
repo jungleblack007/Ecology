@@ -1,0 +1,56 @@
+/**
+ * @author Simon Riendeau
+ * 
+ */
+
+abstract class EcoEvent {
+    private double time; //Temps de l'evenement
+    protected boolean isReal = false; //V:L'EcoEvent est reel. F:L'EcoEvent ne peut pas avoir lieu.
+    protected boolean isClamped = false; //Clamping: pour les speciations qu'on ne peut retirer
+    protected EcoEvent ecoprev, econext;
+    protected NicheEvent nid; //nid: NicheEvent portant cet EcoEvent
+    /* newSpecie est defini dans EcoEvent et non pas dans SpeciationEvent, afin
+     * de pouvoir y acceder dans Ecology
+     */
+    
+    EcoEvent(NicheEvent ne, double t) {
+        time = t;
+        nid = ne;
+        nid.setEcoEvent(this);
+    }
+    
+    void ecoInsert(EcoEvent e1, EcoEvent e2) {
+        ecoprev = e1;
+        econext = e2;
+        e1.econext = this;
+        e2.ecoprev = this;
+    }
+    
+    abstract void decideIfReal();
+    /*Idee de Raphael: mettre getCladeSize abstraite et l'implementer dans chaque
+      sous-classe, de facon a pouvoir appeller getCladeSize sur l'ancetre commun */
+    abstract int getCladeSize();
+    
+    boolean isCladogenetic() {
+        return false;
+    }
+    
+    boolean localTest() {
+        return true;
+    }
+    
+    NicheEvent getNewSpecie() {
+        return null;
+    }
+    
+    double getTime() {
+        return time;
+    }
+    
+    void removeEcoRefs() {
+        EcoEvent prev = ecoprev;
+        EcoEvent next = econext;
+        if (prev!=null) prev.econext = next;
+        if (next!=null) next.ecoprev = prev;
+    }  
+}
