@@ -12,4 +12,9 @@ The package consists of 7 classes in which 1 super class (EcoEvent) represents a
 4 classes inherit from EcoEvent: FirstEcoEvent, representing events that can potentialy be choosen as the root of the whole tree, SpeciationEvent, ExtinctionEvent and LastEcoEvent, 1 per niche and representing ecologic events at the present, when time = 0.
 
 Ecology, the main class of the project, has in its own main method an infinite while loop (it is wanted) in which SpeciationEvent and ExtinctionEvent are proposed.
-Sub methods are instanciating the SpeciationEvent/ExtinctionEvent, 
+Sub methods are instanciating the SpeciationEvent/ExtinctionEvent, and the move is accepted according to the Metropolis-Hastings algorithm and on whether or not the clamped clade has changed (if it did, the move is rejected).
+
+Sub methods also propose, again according to Metropolis-Hastigs algorithm, to change the rate of speciation/extinction/niche activation and the niche and time of the root.
+Here again, any change in the clade makes the move rejected.
+
+To decide if a niche is occupied and if an EcoEvent is real, after each proposition of move the whole ecology is scanned. The method decideIfReal() is called on each node of the EcoEvent list.
