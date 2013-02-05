@@ -1,15 +1,18 @@
 /**
+ * 
  * @author Simon Riendeau
  */
 
 class NicheEvent {
     int niche;
-    boolean isOccupied = false; // => ecq il y a deja une espece sur la niche?
-    boolean nicheActive = true;
+    boolean isOccupied = false;
+    boolean nicheActive = true; //By default, the niches are free for a new specie
     EcoEvent e;
-    NicheEvent prev,next;
+    NicheEvent prev,next; //Previous and next NicheEvent nodes on the niche
     
-    NicheEvent(int n) {niche = n;}
+    NicheEvent(int n) { //Constructor class
+        niche = n;
+    }
     
     void setEcoEvent(EcoEvent e1) {e = e1;}
     
@@ -20,7 +23,7 @@ class NicheEvent {
         if (ne2!=null) ne2.prev = this;
     }
     
-    void removeNicheRefs() {
+    void removeNicheEventRefs() { //The NicheEvent itself is only dereferenced
         NicheEvent prev = this.prev;
         NicheEvent next = this.next;
         if(prev!=null) prev.next = next;
