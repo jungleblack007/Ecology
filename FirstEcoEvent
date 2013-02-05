@@ -10,7 +10,7 @@ public class FirstEcoEvent extends EcoEvent {
     
     @Override
     void decideIfReal(){
-        //FirstEcoEvent: isReal dans Ecology (clamping)
+        //FirstEcoEvent: isReal is set in in clamping() method from Ecology class
         nid.isOccupied = isReal && nid.nicheActive;
         nid.next.isOccupied = nid.isOccupied;
         nid.next.nicheActive = nid.nicheActive;
