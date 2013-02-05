@@ -12,8 +12,8 @@ class ExtinctionEvent extends EcoEvent {
     @Override
     void decideIfReal() { //Overridden method (from EcoEvent)
         isReal = nid.isOccupied && nid.nicheActive;
-            //The niche has to be occupied and active for the extinction to be true
-            //The niche is no longer occupied
+            /* The niche has to be occupied and active for the extinction to be true
+               After an ExtinctionEvent, its niche is no longer occupied */
         nid.next.isOccupied = false;
         nid.next.nicheActive = nid.nicheActive;
         econext.decideIfReal();
