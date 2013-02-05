@@ -4,25 +4,30 @@
  */
 
 class LastEcoEvent extends EcoEvent {
-    private boolean isVerified = false; //V:getCladeSize verifie. F:Pas encore verifie.
+    private boolean isVerified = false; //If true, it means getCladeSize
+        //has already been appealed on this instance
     LastEcoEvent(NicheEvent ne, double t) {
         super(ne,t);
     }
     
-    void reset() {
+    @Override
+    void reset() { //To reset isVerified
         isVerified = false;
+        ecoprev.reset();
     }
     
     @Override
-    void decideIfReal() {
+    void decideIfReal() { //True if the niche is occupied and active
         isReal = nid.isOccupied && nid.nicheActive;
-        if (econext!=null) econext.decideIfReal();
+        if (econext!=null) {
+            econext.decideIfReal();
+        }
     }
     
     @Override
     int getCladeSize() {
         if (isReal && !isVerified) {
-            isVerified = true; //Evite de ré-incrémenter la taille du clade
+            isVerified = true; //isVerified stops a LastEcoEvent frome being counted twice or more
             return 1;
         }
         else {
